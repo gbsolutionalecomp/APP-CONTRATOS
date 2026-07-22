@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Gestión de Contratos SQL | GBS Solutions</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- FontAwesome Font Iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+    <header>
+        <div class="logo-container">
+            <div class="logo-icon">
+                <i class="fa-solid fa-database"></i>
+            </div>
+            <div class="logo-text">
+                <h1>Módulo de Contratos SQL</h1>
+                <p>PROYECTO ANTIGRAVITY | Asociación de Archivos Locales PC</p>
+            </div>
+        </div>
+    </header>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon"><i class="fa-solid fa-file-contract"></i></div>
+            <div class="stat-info">
+                <h3>Total Contratos</h3>
+                <div class="value" id="stat-total">0</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color: var(--success); background: rgba(16, 185, 129, 0.1);"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="stat-info">
+                <h3>Contratos Activos</h3>
+                <div class="value" id="stat-activos">0</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="color: var(--warning); background: rgba(245, 158, 11, 0.1);"><i class="fa-solid fa-folder-open"></i></div>
+            <div class="stat-info">
+                <h3>Rutas PC Vinculadas</h3>
+                <div class="value" id="stat-rutas">0</div>
+            </div>
+        </div>
+    </div>
+
+    <main>
+        <div class="toolbar">
+            <div class="search-box">
+                <i class="fa-solid fa-search"></i>
+                <input type="text" id="searchInput" placeholder="Buscar por nomenclatura (Llave Primaria), cliente, tipo o ubicación...">
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" onclick="openModal()">
+                    <i class="fa-solid fa-plus"></i> Nuevo Contrato
+                </button>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nomenclatura (PK)</th>
+                        <th>Nombre del Contrato</th>
+                        <th>Contraparte / Cliente</th>
+                        <th>Tipo</th>
+                        <th>Vencimiento</th>
+                        <th>Monto</th>
+                        <th>Estado</th>
+                        <th>Ubicación PC (Ruta)</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="contractsTableBody">
+                    <!-- Filas cargadas dinámicamente con JS -->
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Modal Registro / Edición -->
+    <div class="modal" id="contractModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Nuevo Registro de Contrato</h2>
+                <button class="close-btn" onclick="closeModal()"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <form id="contractForm" onsubmit="saveContract(event)">
+                <div class="modal-body">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="codigo_nomenclatura">Código Nomenclatura (Llave Primaria)*</label>
+                            <input type="text" id="codigo_nomenclatura" required placeholder="Ej. CON-2026-001">
+                        </div>
+                        <div class="form-group">
+                            <label for="tipo_contrato">Tipo de Contrato</label>
+                            <select id="tipo_contrato">
+                                <option value="Servicios Profesional">Servicios Profesionales</option>
+                                <option value="Proveedor / Insumos">Proveedor / Insumos</option>
+                                <option value="Arrendamiento">Arrendamiento</option>
+                                <option value="Confidencialidad (NDA)">Confidencialidad (NDA)</option>
+                                <option value="Otro">Otro</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group full">
+                            <label for="nombre_contrato">Nombre de Contrato*</label>
+                            <input type="text" id="nombre_contrato" required placeholder="Ej. Contrato de Mantenimiento de Servidores GBS">
+                        </div>
+
+                        <div class="form-group full">
+                            <label for="contraparte">Contraparte / Cliente / Empresa*</label>
+                            <input type="text" id="contraparte" required placeholder="Ej. Solutions Tech S.A.">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="fecha_inicio">Fecha Inicio</label>
+                            <input type="date" id="fecha_inicio">
+                        </div>
+                        <div class="form-group">
+                            <label for="fecha_fin">Fecha Fin / Vencimiento</label>
+                            <input type="date" id="fecha_fin">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="monto">Monto</label>
+                            <input type="number" step="0.01" id="monto" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label for="moneda">Moneda</label>
+                            <select id="moneda">
+                                <option value="USD">USD ($)</option>
+                                <option value="GTQ">GTQ (Q)</option>
+                                <option value="EUR">EUR (€)</option>
+                                <option value="MXN">MXN ($)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group full">
+                            <label for="estado">Estado de Contrato</label>
+                            <select id="estado">
+                                <option value="ACTIVO">ACTIVO</option>
+                                <option value="EN REVISION">EN REVISION</option>
+                                <option value="VENCIDO">VENCIDO</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group full">
+                            <label for="ubicacion_pc">Ubicación Local en la PC (Ruta Absoluta / Relativa)*</label>
+                            <input type="text" id="ubicacion_pc" required placeholder="Ej. C:\Usuarios\Documentos\Contratos\CON-2026-001.pdf">
+                        </div>
+
+                        <div class="form-group full">
+                            <label for="observaciones">Observaciones / Notas</label>
+                            <textarea id="observaciones" rows="2" placeholder="Notas adicionales..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Guardar en SQL</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
