@@ -301,7 +301,7 @@ function exportToCSV() {
     showToast('Exportación a Excel / CSV descargada', 'success');
 }
 
-/* Modales & Extracción de OC con OCR Inteligente */
+/* Modales & Extracción de OC con OCR Híbrido Client+Server */
 function openOCModal() {
     const loadingEl = document.getElementById('ocLoading');
     const previewEl = document.getElementById('ocPreview');
@@ -354,6 +354,16 @@ function handleOCFileSelect(event) {
     }
 }
 
+// Convertir archivo a Base64
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
 async function processOCFile(file) {
     const loadingEl = document.getElementById('ocLoading');
     const previewEl = document.getElementById('ocPreview');
@@ -365,27 +375,35 @@ async function processOCFile(file) {
     if (useDataBtn) useDataBtn.style.display = 'none';
     if (statusTextEl) statusTextEl.innerText = `Cargando archivo ${file.name}...`;
 
-    showToast(`Iniciando motor de reconocimiento OCR: ${file.name}...`, 'info');
+    showToast(`Iniciando OCR y análisis de documento: ${file.name}...`, 'info');
 
     let extractedText = '';
+    let base64Content = '';
 
     try {
+        // Generar base64 para envío seguro al servidor
+        try {
+            base64Content = await fileToBase64(file);
+        } catch (b64Err) {
+            console.warn('Error leyendo base64 del archivo:', b64Err);
+        }
+
         const fileType = file.type || '';
         const fileName = file.name.toLowerCase();
 
-        // 1. Archivos de texto plano (.txt, .csv, .json, .md)
+        // 1. Archivos de texto plano (.txt, .csv, .json)
         if (fileType.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.csv') || fileName.endsWith('.json')) {
-            if (statusTextEl) statusTextEl.innerText = 'Leyendo contenido de texto del documento...';
-            extractedText = await new Promise((resolve, reject) => {
+            if (statusTextEl) statusTextEl.innerText = 'Leyendo texto del documento...';
+            extractedText = await new Promise((resolve) => {
                 const reader = new FileReader();
                 reader.onload = (e) => resolve(e.target.result || '');
-                reader.onerror = reject;
+                reader.onerror = () => resolve('');
                 reader.readAsText(file);
             });
         }
-        // 2. Documentos PDF (.pdf) -> Extracción con PDF.js
+        // 2. Documentos PDF (.pdf) -> Extracción con PDF.js en browser
         else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
-            if (statusTextEl) statusTextEl.innerText = 'Extrayendo capas de texto del documento PDF...';
+            if (statusTextEl) statusTextEl.innerText = 'Analizando capas de texto en PDF...';
             if (typeof pdfjsLib !== 'undefined') {
                 try {
                     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -401,13 +419,13 @@ async function processOCFile(file) {
                     }
                     extractedText = pdfText;
                 } catch (pdfErr) {
-                    console.warn('Fallo extracción nativa PDF, reintentando con fallback:', pdfErr);
+                    console.warn('PDF.js client extraction skipped, relying on backend parser:', pdfErr);
                 }
             }
         }
         // 3. Imágenes (.png, .jpg, .jpeg, .webp, .bmp) -> OCR con Tesseract.js
         else if (fileType.startsWith('image/') || fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.webp')) {
-            if (statusTextEl) statusTextEl.innerText = 'Ejecutando OCR Tesseract para escanear la imagen...';
+            if (statusTextEl) statusTextEl.innerText = 'Escaneando OCR con Tesseract.js...';
             if (typeof Tesseract !== 'undefined') {
                 try {
                     const worker = await Tesseract.createWorker('spa+eng');
@@ -415,28 +433,21 @@ async function processOCFile(file) {
                     extractedText = ret.data.text || '';
                     await worker.terminate();
                 } catch (ocrErr) {
-                    console.warn('Error en Tesseract OCR:', ocrErr);
+                    console.warn('Tesseract client OCR fallback to backend:', ocrErr);
                 }
             }
         }
 
-        // Si no se extrajo texto explícito (p.ej. PDF escaneado sin Tesseract local), intentar OCR directo en imagen o enviar metadata
-        if (!extractedText && (fileType.startsWith('image/') || fileName.endsWith('.png') || fileName.endsWith('.jpg'))) {
-            if (typeof Tesseract !== 'undefined') {
-                const worker = await Tesseract.createWorker('spa');
-                const ret = await worker.recognize(file);
-                extractedText = ret.data.text || '';
-                await worker.terminate();
-            }
-        }
+        if (statusTextEl) statusTextEl.innerText = 'Analizando patrones con motor OCR de IA...';
 
-        // Enviar contenido completo extraído al backend inteligente
+        // Enviar contenido completo extraído y datos base64 al servidor
         const res = await fetch('/api/extraer-oc', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 filename: file.name,
-                contentText: extractedText || file.name
+                contentText: extractedText || '',
+                fileData: base64Content
             })
         });
 
