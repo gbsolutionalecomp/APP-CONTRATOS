@@ -1,13 +1,14 @@
 {
   "name": "proyecto-antigravity-contratos",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Sistema de Gestión de Contratos SQL",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "seed": "node seed.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "GBS Solutions",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
