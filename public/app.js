@@ -381,11 +381,13 @@ async function processOCFile(file) {
     let base64Content = '';
 
     try {
-        // Generar base64 para envío seguro al servidor
-        try {
-            base64Content = await fileToBase64(file);
-        } catch (b64Err) {
-            console.warn('Error leyendo base64 del archivo:', b64Err);
+        // Adjuntar base64 sólo si el archivo es menor a 2.5MB para respetar el límite Vercel Serverless (4.5MB)
+        if (file.size < 2.5 * 1024 * 1024) {
+            try {
+                base64Content = await fileToBase64(file);
+            } catch (b64Err) {
+                console.warn('Error leyendo base64 del archivo:', b64Err);
+            }
         }
 
         const fileType = file.type || '';
@@ -411,7 +413,7 @@ async function processOCFile(file) {
                     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                     let pdfText = '';
                     
-                    for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+                    for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) {
                         const page = await pdf.getPage(i);
                         const textContent = await page.getTextContent();
                         const pageItems = textContent.items.map(item => item.str).join(' ');
@@ -420,6 +422,20 @@ async function processOCFile(file) {
                     extractedText = pdfText;
                 } catch (pdfErr) {
                     console.warn('PDF.js client extraction skipped, relying on backend parser:', pdfErr);
+                }
+            }
+        }
+        // 3. Imágenes (.png, .jpg, .jpeg, .webp, .bmp) -> OCR con Tesseract.js
+        else if (fileType.startsWith('image/') || fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.webp')) {
+            if (statusTextEl) statusTextEl.innerText = 'Escaneando OCR con Tesseract.js...';
+            if (typeof Tesseract !== 'undefined') {
+                try {
+                    const worker = await Tesseract.createWorker('spa+eng');
+                    const ret = await worker.recognize(file);
+                    extractedText = ret.data.text || '';
+                    await worker.terminate();
+                } catch (ocrErr) {
+                    console.warn('Tesseract client OCR fallback to backend:', ocrErr);
                 }
             }
         }
@@ -432,12 +448,20 @@ async function processOCFile(file) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 filename: file.name,
-                contentText: extractedText || '',
+                contentText: extractedText || file.name,
                 fileData: base64Content
             })
         });
 
-        const data = await res.json();
+        const contentType = res.headers.get('content-type') || '';
+        let data;
+        if (contentType.includes('application/json')) {
+            data = await res.json();
+        } else {
+            const rawText = await res.text();
+            throw new Error(rawText.slice(0, 120) || `Error HTTP ${res.status}`);
+        }
+
         if (!res.ok) {
             throw new Error(data.error || `Error en el servidor (${res.status})`);
         }
