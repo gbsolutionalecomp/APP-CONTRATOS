@@ -423,20 +423,6 @@ async function processOCFile(file) {
                 }
             }
         }
-        // 3. Imágenes (.png, .jpg, .jpeg, .webp, .bmp) -> OCR con Tesseract.js
-        else if (fileType.startsWith('image/') || fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.webp')) {
-            if (statusTextEl) statusTextEl.innerText = 'Escaneando OCR con Tesseract.js...';
-            if (typeof Tesseract !== 'undefined') {
-                try {
-                    const worker = await Tesseract.createWorker('spa+eng');
-                    const ret = await worker.recognize(file);
-                    extractedText = ret.data.text || '';
-                    await worker.terminate();
-                } catch (ocrErr) {
-                    console.warn('Tesseract client OCR fallback to backend:', ocrErr);
-                }
-            }
-        }
 
         if (statusTextEl) statusTextEl.innerText = 'Analizando patrones con motor OCR de IA...';
 
@@ -452,6 +438,10 @@ async function processOCFile(file) {
         });
 
         const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || `Error en el servidor (${res.status})`);
+        }
+
         extractedOCData = { ...data, ubicacion_pc: `C:\\Contratos\\OrdenesCompra\\${file.name}` };
 
         document.getElementById('ocResNomenclatura').innerText = data.codigo_nomenclatura;
@@ -467,7 +457,7 @@ async function processOCFile(file) {
     } catch (err) {
         if (loadingEl) loadingEl.style.display = 'none';
         console.error('Error al procesar archivo en OCR:', err);
-        showToast('Error al procesar el archivo en el motor OCR', 'error');
+        showToast(`Error OCR: ${err.message || 'Fallo al procesar archivo'}`, 'error');
     }
 }
 

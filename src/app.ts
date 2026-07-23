@@ -28,9 +28,9 @@ app.use(
 
 app.use(globalRateLimiter);
 
-// Payload parser with size limit
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Payload parser with extended size limit for OCR files
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Static files
 app.use(express.static(path.join(process.cwd(), 'public')));

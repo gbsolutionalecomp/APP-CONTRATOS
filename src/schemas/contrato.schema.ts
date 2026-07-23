@@ -101,6 +101,7 @@ export const contratoQuerySchema = z.object({
 export const extraerOcSchema = z.object({
   filename: z.string().optional(),
   contentText: z.string().optional(),
+  fileData: z.string().optional(),
 });
 
 export const abrirUbicacionSchema = z.object({
