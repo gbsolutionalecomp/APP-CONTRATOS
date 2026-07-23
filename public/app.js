@@ -81,7 +81,6 @@ function updateStats(fullData, filteredData) {
     const totalMontoUSD = fullData.reduce((acc, c) => acc + (parseFloat(c.monto) || 0), 0);
     document.getElementById('stat-monto').innerText = `$${totalMontoUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-    // Total en mostrados
     const filteredMonto = filteredData.reduce((acc, c) => acc + (parseFloat(c.monto) || 0), 0);
     document.getElementById('table-total-monto').innerText = `$${filteredMonto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     document.getElementById('grid-records-count').innerText = `Mostrando ${filteredData.length} de ${fullData.length} registros`;
@@ -139,7 +138,6 @@ function renderTable(data) {
     });
 }
 
-// Generar Nomenclatura Automática basada en reglas SQL corporativas
 function generateAutoNomenclatura() {
     const tipo = document.getElementById('tipo_contrato').value || 'Servicios Profesionales';
     let codeMap = {
@@ -265,7 +263,6 @@ async function deleteContract(codigo) {
     }
 }
 
-// Exportar datos de la tabla actual a archivo Excel CSV
 function exportToCSV() {
     if (currentFilteredData.length === 0) {
         showToast('No hay datos para exportar', 'info');
@@ -273,7 +270,7 @@ function exportToCSV() {
     }
 
     const headers = ['Nomenclatura_PK', 'Nombre_Contrato', 'Contraparte', 'Tipo_Contrato', 'Fecha_Inicio', 'Fecha_Fin', 'Monto', 'Moneda', 'Estado', 'Ubicacion_PC', 'Observaciones'];
-    let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // UTF-8 BOM for Excel
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
     csvContent += headers.join(",") + "\n";
 
     currentFilteredData.forEach(row => {
@@ -304,10 +301,14 @@ function exportToCSV() {
     showToast('Exportación a Excel / CSV descargada', 'success');
 }
 
-/* Modales & Extracción de OC */
+/* Modales & Extracción de OC con OCR Inteligente */
 function openOCModal() {
-    document.getElementById('ocPreview').style.display = 'none';
-    document.getElementById('btnUseOCData').style.display = 'none';
+    const loadingEl = document.getElementById('ocLoading');
+    const previewEl = document.getElementById('ocPreview');
+    const btnUse = document.getElementById('btnUseOCData');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (previewEl) previewEl.style.display = 'none';
+    if (btnUse) btnUse.style.display = 'none';
     document.getElementById('ocModal').classList.add('active');
 }
 
@@ -354,27 +355,108 @@ function handleOCFileSelect(event) {
 }
 
 async function processOCFile(file) {
-    showToast(`Analizando archivo OC: ${file.name}...`, 'info');
-    
+    const loadingEl = document.getElementById('ocLoading');
+    const previewEl = document.getElementById('ocPreview');
+    const statusTextEl = document.getElementById('ocStatusText');
+    const useDataBtn = document.getElementById('btnUseOCData');
+
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (previewEl) previewEl.style.display = 'none';
+    if (useDataBtn) useDataBtn.style.display = 'none';
+    if (statusTextEl) statusTextEl.innerText = `Cargando archivo ${file.name}...`;
+
+    showToast(`Iniciando motor de reconocimiento OCR: ${file.name}...`, 'info');
+
+    let extractedText = '';
+
     try {
+        const fileType = file.type || '';
+        const fileName = file.name.toLowerCase();
+
+        // 1. Archivos de texto plano (.txt, .csv, .json, .md)
+        if (fileType.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.csv') || fileName.endsWith('.json')) {
+            if (statusTextEl) statusTextEl.innerText = 'Leyendo contenido de texto del documento...';
+            extractedText = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result || '');
+                reader.onerror = reject;
+                reader.readAsText(file);
+            });
+        }
+        // 2. Documentos PDF (.pdf) -> Extracción con PDF.js
+        else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+            if (statusTextEl) statusTextEl.innerText = 'Extrayendo capas de texto del documento PDF...';
+            if (typeof pdfjsLib !== 'undefined') {
+                try {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    let pdfText = '';
+                    
+                    for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        const pageItems = textContent.items.map(item => item.str).join(' ');
+                        pdfText += pageItems + '\n';
+                    }
+                    extractedText = pdfText;
+                } catch (pdfErr) {
+                    console.warn('Fallo extracción nativa PDF, reintentando con fallback:', pdfErr);
+                }
+            }
+        }
+        // 3. Imágenes (.png, .jpg, .jpeg, .webp, .bmp) -> OCR con Tesseract.js
+        else if (fileType.startsWith('image/') || fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.webp')) {
+            if (statusTextEl) statusTextEl.innerText = 'Ejecutando OCR Tesseract para escanear la imagen...';
+            if (typeof Tesseract !== 'undefined') {
+                try {
+                    const worker = await Tesseract.createWorker('spa+eng');
+                    const ret = await worker.recognize(file);
+                    extractedText = ret.data.text || '';
+                    await worker.terminate();
+                } catch (ocrErr) {
+                    console.warn('Error en Tesseract OCR:', ocrErr);
+                }
+            }
+        }
+
+        // Si no se extrajo texto explícito (p.ej. PDF escaneado sin Tesseract local), intentar OCR directo en imagen o enviar metadata
+        if (!extractedText && (fileType.startsWith('image/') || fileName.endsWith('.png') || fileName.endsWith('.jpg'))) {
+            if (typeof Tesseract !== 'undefined') {
+                const worker = await Tesseract.createWorker('spa');
+                const ret = await worker.recognize(file);
+                extractedText = ret.data.text || '';
+                await worker.terminate();
+            }
+        }
+
+        // Enviar contenido completo extraído al backend inteligente
         const res = await fetch('/api/extraer-oc', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: file.name, contentText: file.name })
+            body: JSON.stringify({
+                filename: file.name,
+                contentText: extractedText || file.name
+            })
         });
+
         const data = await res.json();
-        extractedOCData = { ...data, ubicacion_pc: `C:\\Contratos\\OC\\${file.name}` };
+        extractedOCData = { ...data, ubicacion_pc: `C:\\Contratos\\OrdenesCompra\\${file.name}` };
 
         document.getElementById('ocResNomenclatura').innerText = data.codigo_nomenclatura;
         document.getElementById('ocResNombre').innerText = data.nombre_contrato;
         document.getElementById('ocResContraparte').innerText = data.contraparte;
-        document.getElementById('ocResMonto').innerText = `${data.moneda} $${data.monto.toLocaleString()}`;
+        document.getElementById('ocResMonto').innerText = `${data.moneda} $${(data.monto || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-        document.getElementById('ocPreview').style.display = 'block';
-        document.getElementById('btnUseOCData').style.display = 'inline-flex';
-        showToast('¡Información de OC extraída exitosamente!', 'success');
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (previewEl) previewEl.style.display = 'block';
+        if (useDataBtn) useDataBtn.style.display = 'inline-flex';
+
+        showToast('¡Procesamiento OCR completado exitosamente!', 'success');
     } catch (err) {
-        showToast('Error al procesar el archivo OC', 'error');
+        if (loadingEl) loadingEl.style.display = 'none';
+        console.error('Error al procesar archivo en OCR:', err);
+        showToast('Error al procesar el archivo en el motor OCR', 'error');
     }
 }
 
@@ -394,10 +476,9 @@ function applyExtractedOCData() {
     document.getElementById('ubicacion_pc').value = extractedOCData.ubicacion_pc;
     document.getElementById('observaciones').value = extractedOCData.observaciones;
 
-    showToast('Campos completados desde la Orden de Compra', 'info');
+    showToast('Campos de formulario auto-completados desde OCR', 'info');
 }
 
-/* Helpers */
 function copyPath(path) {
     navigator.clipboard.writeText(path).then(() => {
         showToast('Ruta copiada al portapapeles', 'info');
@@ -451,4 +532,3 @@ function escapeJsString(str) {
     if (!str) return '';
     return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
 }
-

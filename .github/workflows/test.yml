@@ -1,0 +1,44 @@
+name: CI Test & Quality Check
+
+on:
+  push:
+    branches: [ main, dev, feature/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Lint, Build & Test
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Compile TypeScript
+        run: npm run build
+
+      - name: Run Tests with Coverage
+        run: npm run test:coverage
+        env:
+          NODE_ENV: test
+          PORT: 3005
+          DATABASE_PATH: ./test.db
+          SUPABASE_URL: https://dummy.supabase.co
+          SUPABASE_KEY: dummykey

@@ -7,6 +7,9 @@
     <link rel="stylesheet" href="styles.css">
     <!-- FontAwesome Iconos (Monocromo) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- OCR Engine: Tesseract.js & PDF.js for Document Extraction -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
 
@@ -71,7 +74,7 @@
 
             <div class="toolbar-actions">
                 <button class="btn btn-outline" onclick="openOCModal()">
-                    <i class="fa-solid fa-file-import"></i> Extraer de OC
+                    <i class="fa-solid fa-file-import"></i> Extraer de OC (OCR)
                 </button>
                 <button class="btn btn-outline" onclick="exportToCSV()">
                     <i class="fa-solid fa-download"></i> Exportar CSV/Excel
@@ -208,26 +211,32 @@
         </div>
     </div>
 
-    <!-- Modal Extracción desde Orden de Compra (OC) -->
+    <!-- Modal Extracción desde Orden de Compra (OC - OCR) -->
     <div class="modal" id="ocModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Extracción de Datos desde Orden de Compra (OC)</h3>
+                <h3>Extracción Inteligente OCR de Orden de Compra (OC)</h3>
                 <button class="close-btn" onclick="closeOCModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <p style="color: #4b5563; font-size: 0.85rem; margin-bottom: 1rem;">
-                    Seleccione un archivo de Orden de Compra (OC) para extraer información y precompletar el registro SQL.
+                    Seleccione o arrastre un documento (PDF, PNG, JPG, TXT) para ejecutar el motor OCR y extraer automáticamente los datos del contrato.
                 </p>
 
                 <div class="dropzone" id="ocDropzone" onclick="triggerFileInput()">
-                    <p><strong>Arrastre aquí el archivo de Orden de Compra</strong></p>
-                    <p style="font-size: 0.8rem; color: #6b7280; margin-top: 4px;">O haga clic para seleccionar archivo</p>
-                    <input type="file" id="ocFileInput" style="display: none;" onchange="handleOCFileSelect(event)">
+                    <i class="fa-solid fa-file-pdf" style="font-size: 2rem; color: #4f46e5; margin-bottom: 8px;"></i>
+                    <p><strong>Arrastre aquí el archivo de Orden de Compra (PDF, PNG, JPG, TXT)</strong></p>
+                    <p style="font-size: 0.8rem; color: #6b7280; margin-top: 4px;">O haga clic para explorar en su equipo</p>
+                    <input type="file" id="ocFileInput" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.json" style="display: none;" onchange="handleOCFileSelect(event)">
+                </div>
+
+                <div id="ocLoading" style="display: none; text-align: center; margin: 15px 0;">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; color: #4f46e5;"></i>
+                    <p id="ocStatusText" style="font-size: 0.85rem; margin-top: 6px; color: #374151;">Ejecutando reconocimiento óptico de caracteres (OCR)...</p>
                 </div>
 
                 <div id="ocPreview" class="oc-preview-box" style="display: none;">
-                    <p><strong>Datos Extraídos:</strong></p>
+                    <p><strong>Datos Extraídos con OCR:</strong></p>
                     <div class="oc-extracted-grid">
                         <div><strong>Código Sugerido:</strong> <span id="ocResNomenclatura"></span></div>
                         <div><strong>Contrato:</strong> <span id="ocResNombre"></span></div>
@@ -248,5 +257,3 @@
     <script src="app.js"></script>
 </body>
 </html>
-
-
