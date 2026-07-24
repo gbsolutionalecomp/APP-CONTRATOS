@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "builds": [
     {
-      "src": "dist/server.js",
+      "src": "dist/src/server.js",
       "use": "@vercel/node"
     },
     {
@@ -14,7 +14,7 @@
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "dist/server.js"
+      "dest": "dist/src/server.js"
     },
     {
       "src": "/(.*)",
