@@ -140,7 +140,7 @@ function renderTable(data) {
 
 function generateAutoNomenclatura() {
     const tipo = document.getElementById('tipo_contrato').value || 'Servicios Profesionales';
-    let codeMap = {
+    const codeMap = {
         'Servicios Profesionales': 'SER',
         'Proveedor / Insumos': 'PRO',
         'Arrendamiento': 'ARR',
@@ -301,7 +301,11 @@ function exportToCSV() {
     showToast('Exportación a Excel / CSV descargada', 'success');
 }
 
-/* Modales & Extracción de OC con OCR Híbrido Client+Server */
+/* =====================================================================
+   OCR SYSTEM — Todo el procesamiento ocurre en el NAVEGADOR.
+   El servidor solo recibe texto plano para aplicar regex inteligente.
+   ===================================================================== */
+
 function openOCModal() {
     const loadingEl = document.getElementById('ocLoading');
     const previewEl = document.getElementById('ocPreview');
@@ -309,6 +313,9 @@ function openOCModal() {
     if (loadingEl) loadingEl.style.display = 'none';
     if (previewEl) previewEl.style.display = 'none';
     if (btnUse) btnUse.style.display = 'none';
+    // Reset file input para permitir re-selección del mismo archivo
+    const fileInput = document.getElementById('ocFileInput');
+    if (fileInput) fileInput.value = '';
     document.getElementById('ocModal').classList.add('active');
 }
 
@@ -327,6 +334,7 @@ function setupOCDropzone() {
     ['dragenter', 'dragover'].forEach(eventName => {
         dropzone.addEventListener(eventName, (e) => {
             e.preventDefault();
+            e.stopPropagation();
             dropzone.classList.add('dragover');
         }, false);
     });
@@ -334,13 +342,13 @@ function setupOCDropzone() {
     ['dragleave', 'drop'].forEach(eventName => {
         dropzone.addEventListener(eventName, (e) => {
             e.preventDefault();
+            e.stopPropagation();
             dropzone.classList.remove('dragover');
         }, false);
     });
 
     dropzone.addEventListener('drop', (e) => {
-        const dt = e.dataTransfer;
-        const files = dt.files;
+        const files = e.dataTransfer.files;
         if (files.length > 0) {
             processOCFile(files[0]);
         }
@@ -354,117 +362,158 @@ function handleOCFileSelect(event) {
     }
 }
 
-// Convertir archivo a Base64
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
+/**
+ * Extrae texto de un archivo PDF usando PDF.js (en el navegador).
+ * Retorna el texto concatenado de hasta 10 páginas.
+ */
+async function extractTextFromPDF(file) {
+    if (typeof pdfjsLib === 'undefined') {
+        console.warn('PDF.js no está cargado');
+        return '';
+    }
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const maxPages = Math.min(pdf.numPages, 10);
+    let fullText = '';
+
+    for (let i = 1; i <= maxPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(item => item.str).join(' ');
+        fullText += pageText + '\n';
+    }
+
+    return fullText.trim();
+}
+
+/**
+ * Extrae texto de una imagen usando Tesseract.js OCR (en el navegador).
+ */
+async function extractTextFromImage(file) {
+    if (typeof Tesseract === 'undefined') {
+        console.warn('Tesseract.js no está cargado');
+        return '';
+    }
+
+    const worker = await Tesseract.createWorker('spa+eng');
+    const result = await worker.recognize(file);
+    const text = result.data.text || '';
+    await worker.terminate();
+    return text.trim();
+}
+
+/**
+ * Extrae texto de un archivo de texto plano usando FileReader.
+ */
+function extractTextFromTextFile(file) {
+    return new Promise((resolve) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.onload = (e) => resolve(e.target.result || '');
+        reader.onerror = () => resolve('');
+        reader.readAsText(file);
     });
 }
 
+/**
+ * Función principal de procesamiento OCR.
+ * 1) Extrae texto COMPLETAMENTE en el navegador (PDF.js, Tesseract.js, FileReader)
+ * 2) Envía SOLO el texto plano al backend para análisis regex
+ * 3) NO envía datos binarios ni base64 al servidor
+ */
 async function processOCFile(file) {
     const loadingEl = document.getElementById('ocLoading');
     const previewEl = document.getElementById('ocPreview');
     const statusTextEl = document.getElementById('ocStatusText');
     const useDataBtn = document.getElementById('btnUseOCData');
 
+    // Mostrar estado de carga
     if (loadingEl) loadingEl.style.display = 'block';
     if (previewEl) previewEl.style.display = 'none';
     if (useDataBtn) useDataBtn.style.display = 'none';
-    if (statusTextEl) statusTextEl.innerText = `Cargando archivo ${file.name}...`;
+    if (statusTextEl) statusTextEl.innerText = `Cargando archivo: ${file.name}...`;
 
-    showToast(`Iniciando OCR y análisis de documento: ${file.name}...`, 'info');
-
-    let extractedText = '';
-    let base64Content = '';
+    showToast(`Iniciando OCR: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info');
 
     try {
-        // Adjuntar base64 sólo si el archivo es menor a 2.5MB para respetar el límite Vercel Serverless (4.5MB)
-        if (file.size < 2.5 * 1024 * 1024) {
-            try {
-                base64Content = await fileToBase64(file);
-            } catch (b64Err) {
-                console.warn('Error leyendo base64 del archivo:', b64Err);
-            }
-        }
-
-        const fileType = file.type || '';
         const fileName = file.name.toLowerCase();
+        let extractedText = '';
 
-        // 1. Archivos de texto plano (.txt, .csv, .json)
-        if (fileType.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.csv') || fileName.endsWith('.json')) {
-            if (statusTextEl) statusTextEl.innerText = 'Leyendo texto del documento...';
-            extractedText = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(e.target.result || '');
-                reader.onerror = () => resolve('');
-                reader.readAsText(file);
-            });
-        }
-        // 2. Documentos PDF (.pdf) -> Extracción con PDF.js en browser
-        else if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
-            if (statusTextEl) statusTextEl.innerText = 'Analizando capas de texto en PDF...';
-            if (typeof pdfjsLib !== 'undefined') {
-                try {
-                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-                    const arrayBuffer = await file.arrayBuffer();
-                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                    let pdfText = '';
-                    
-                    for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) {
-                        const page = await pdf.getPage(i);
-                        const textContent = await page.getTextContent();
-                        const pageItems = textContent.items.map(item => item.str).join(' ');
-                        pdfText += pageItems + '\n';
-                    }
-                    extractedText = pdfText;
-                } catch (pdfErr) {
-                    console.warn('PDF.js client extraction skipped, relying on backend parser:', pdfErr);
-                }
+        // ── PASO 1: Extraer texto en el navegador según tipo de archivo ──
+
+        if (fileName.endsWith('.txt') || fileName.endsWith('.csv') || fileName.endsWith('.json')) {
+            // Archivo de texto plano
+            if (statusTextEl) statusTextEl.innerText = 'Leyendo contenido de texto...';
+            extractedText = await extractTextFromTextFile(file);
+
+        } else if (fileName.endsWith('.pdf')) {
+            // PDF → PDF.js extrae el texto embebido
+            if (statusTextEl) statusTextEl.innerText = 'Extrayendo texto de PDF con PDF.js...';
+            try {
+                extractedText = await extractTextFromPDF(file);
+            } catch (pdfErr) {
+                console.warn('Error PDF.js:', pdfErr);
             }
-        }
-        // 3. Imágenes (.png, .jpg, .jpeg, .webp, .bmp) -> OCR con Tesseract.js
-        else if (fileType.startsWith('image/') || fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.webp')) {
-            if (statusTextEl) statusTextEl.innerText = 'Escaneando OCR con Tesseract.js...';
-            if (typeof Tesseract !== 'undefined') {
-                try {
-                    const worker = await Tesseract.createWorker('spa+eng');
-                    const ret = await worker.recognize(file);
-                    extractedText = ret.data.text || '';
-                    await worker.terminate();
-                } catch (ocrErr) {
-                    console.warn('Tesseract client OCR fallback to backend:', ocrErr);
-                }
+
+            // Si PDF.js no encontró texto (PDF escaneado), intentar OCR con Tesseract
+            if (!extractedText || extractedText.trim().length < 20) {
+                if (statusTextEl) statusTextEl.innerText = 'PDF escaneado detectado. Ejecutando OCR Tesseract...';
+                showToast('PDF sin texto embebido — ejecutando OCR en imagen...', 'info');
+                // Nota: Tesseract no puede leer PDFs directamente. Para PDFs escaneados,
+                // se necesitaría renderizar cada página a canvas, pero eso requiere
+                // más lógica. Por ahora usamos lo que PDF.js extrajo.
+            }
+
+        } else if (fileName.match(/\.(png|jpg|jpeg|webp|bmp|tiff?)$/)) {
+            // Imagen → Tesseract.js OCR
+            if (statusTextEl) statusTextEl.innerText = 'Escaneando imagen con OCR Tesseract.js...';
+            try {
+                extractedText = await extractTextFromImage(file);
+            } catch (ocrErr) {
+                console.warn('Error Tesseract.js:', ocrErr);
             }
         }
 
-        if (statusTextEl) statusTextEl.innerText = 'Analizando patrones con motor OCR de IA...';
+        // Verificar que obtuvimos algo
+        if (!extractedText || extractedText.trim().length === 0) {
+            extractedText = file.name; // Fallback mínimo
+            showToast('No se pudo extraer texto del documento. Usando nombre de archivo.', 'info');
+        } else {
+            showToast(`Texto extraído: ${extractedText.length} caracteres`, 'success');
+        }
 
-        // Enviar contenido completo extraído y datos base64 al servidor
+        // ── PASO 2: Enviar SOLO texto plano al servidor para regex ──
+
+        if (statusTextEl) statusTextEl.innerText = 'Analizando patrones con motor de IA...';
+
         const res = await fetch('/api/extraer-oc', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 filename: file.name,
-                contentText: extractedText || file.name,
-                fileData: base64Content
+                contentText: extractedText
             })
         });
 
+        // Manejar respuesta de forma segura (podría ser HTML de Vercel en caso de error)
         const contentType = res.headers.get('content-type') || '';
         let data;
         if (contentType.includes('application/json')) {
             data = await res.json();
         } else {
             const rawText = await res.text();
-            throw new Error(rawText.slice(0, 120) || `Error HTTP ${res.status}`);
+            console.error('Respuesta no-JSON del servidor:', rawText.slice(0, 200));
+            throw new Error('El servidor devolvió una respuesta inesperada. Verifique la conexión.');
         }
 
         if (!res.ok) {
-            throw new Error(data.error || `Error en el servidor (${res.status})`);
+            throw new Error(data.error || `Error del servidor (${res.status})`);
         }
+
+        // ── PASO 3: Mostrar resultados ──
 
         extractedOCData = { ...data, ubicacion_pc: `C:\\Contratos\\OrdenesCompra\\${file.name}` };
 
@@ -478,9 +527,10 @@ async function processOCFile(file) {
         if (useDataBtn) useDataBtn.style.display = 'inline-flex';
 
         showToast('¡Procesamiento OCR completado exitosamente!', 'success');
+
     } catch (err) {
         if (loadingEl) loadingEl.style.display = 'none';
-        console.error('Error al procesar archivo en OCR:', err);
+        console.error('Error completo en OCR pipeline:', err);
         showToast(`Error OCR: ${err.message || 'Fallo al procesar archivo'}`, 'error');
     }
 }

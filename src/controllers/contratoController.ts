@@ -5,22 +5,6 @@ import { exec } from 'child_process';
 import { logger } from '../utils/logger';
 import { BadRequestError, InternalServerError } from '../utils/errors';
 
-// Dynamic imports for pdf-parse and tesseract.js to handle OCR gracefully
-let pdfParse: any = null;
-let tesseract: any = null;
-
-try {
-  pdfParse = require('pdf-parse');
-} catch (e) {
-  logger.warn('pdf-parse no disponible en Node:', e);
-}
-
-try {
-  tesseract = require('tesseract.js');
-} catch (e) {
-  logger.warn('tesseract.js no disponible en Node:', e);
-}
-
 export class ContratoController {
   public async getContratos(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
@@ -75,45 +59,20 @@ export class ContratoController {
     }
   }
 
-  public async extraerOc(req: Request, res: Response, next: NextFunction): Promise<void> {
+  /**
+   * Endpoint que recibe TEXTO ya extraído por el navegador (PDF.js / Tesseract.js)
+   * y aplica regex inteligente para detectar montos, contraparte, moneda, etc.
+   * NO intenta parsear archivos binarios — todo el OCR ocurre en el cliente.
+   */
+  public extraerOc(req: Request, res: Response, next: NextFunction): void {
     try {
-      const { filename, contentText, fileData } = req.body;
-      let text = (contentText || '').toString();
+      const { filename, contentText } = req.body;
+      const text = (contentText || '').toString();
       const name = (filename || 'Documento_OC.pdf').toString();
-      const isPdf = name.toLowerCase().endsWith('.pdf');
-      const isImage = /\.(png|jpg|jpeg|webp|bmp)$/i.test(name);
-
-      // Si se envió un archivo en base64 (fileData) y el texto extraído es corto, ejecutar parsing en backend
-      if (fileData && (!text || text === name || text.length < 20)) {
-        try {
-          const base64Data = fileData.replace(/^data:[^;]+;base64,/, '');
-          const buffer = Buffer.from(base64Data, 'base64');
-
-          if (isPdf && pdfParse) {
-            logger.info('Parseando documento PDF en backend con pdf-parse...');
-            const pdfResult = await pdfParse(buffer);
-            text = pdfResult.text || '';
-          }
-
-          if (isImage && tesseract && (!text || text.trim().length < 10)) {
-            logger.info('Ejecutando OCR Tesseract en backend Node.js...');
-            const worker = await tesseract.createWorker('spa+eng');
-            const ret = await worker.recognize(buffer);
-            text = ret.data.text || '';
-            await worker.terminate();
-          }
-        } catch (backendErr: any) {
-          logger.warn(`Error en extracción backend OCR: ${backendErr.message}`);
-        }
-      }
-
-      if (!text || text.length === 0) {
-        text = name;
-      }
 
       const currentYear = new Date().getFullYear();
 
-      // 1. Extraer Monto
+      // 1. Extraer Monto — buscar keywords de total seguidas de cifras monetarias
       const totalMatch = text.match(
         /(?:TOTAL|MONTO|IMPORTE|SUMA|PRECIO|VALOR|NETO|GRAND\s+TOTAL)[\s:]*(?:Q|\$|USD|GTQ|EUR|MXN)?\s*([0-9]{1,3}(?:[.,][0-9]{3})*(?:[.,][0-9]{2})?|[0-9]+(?:[.,][0-9]{2})?)/i
       );
@@ -134,13 +93,13 @@ export class ContratoController {
       );
       const ocNumero = ocMatch ? ocMatch[1] : Math.floor(1000 + Math.random() * 9000);
 
-      // 3. Extraer Contraparte
+      // 3. Extraer Contraparte — cortar antes de cualquier keyword de monto
       const contraparteMatch = text.match(
         /(?:PROVEEDOR|CLIENTE|EMPRESA|PARA|DE|RAZON\s+SOCIAL|SEÑORES|SR\.|SRA\.|EMITIDO\s+A):\s*([^\n\r,;]+?)(?=\s*(?:MONTO|TOTAL|IMPORTE|SUMA|PRECIO|VALOR|NETO|OC|PO|ORDEN|CONTRATO|NO\.|NUMERO|NÚMERO|FOLIO|\$|Q|USD|GTQ|EUR|MXN)|,|$)/i
       );
       const contraparte = contraparteMatch ? contraparteMatch[1].trim() : 'Proveedor Detectado S.A.';
 
-      // 4. Moneda
+      // 4. Detectar Moneda
       let moneda = 'USD';
       if (text.includes('GTQ') || text.includes(' Q ') || text.includes('Q.')) moneda = 'GTQ';
       else if (text.includes('EUR') || text.includes('€')) moneda = 'EUR';
@@ -160,7 +119,7 @@ export class ContratoController {
         moneda: moneda,
         estado: 'ACTIVO',
         ubicacion_pc: `C:\\Contratos\\Documentos\\${name}`,
-        observaciones: `OCR procesado exitosamente (${text.length} caracteres de texto).`,
+        observaciones: `OCR procesado (${text.length} caracteres extraídos del documento).`,
       });
     } catch (err) {
       next(err);
